@@ -5,12 +5,12 @@ import logging
 import time
 
 import torch
-import torch.distributed as dist
 
 from maskrcnn_benchmark.utils.comm import get_world_size, is_main_process, synchronize
 from maskrcnn_benchmark.utils.metric_logger import MetricLogger
 
 from apex import amp
+import herring.torch as herring
 
 def reduce_loss_dict(loss_dict):
     """
@@ -28,8 +28,8 @@ def reduce_loss_dict(loss_dict):
             loss_names.append(k)
             all_losses.append(loss_dict[k])
         all_losses = torch.stack(all_losses, dim=0)
-        dist.reduce(all_losses, dst=0)
-        if dist.get_rank() == 0:
+        herring.reduce(all_losses, dst=0)
+        if herring.get_rank() == 0:
             # only main process gets accumulated, so only divide by
             # world_size in this case
             all_losses /= world_size

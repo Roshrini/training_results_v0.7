@@ -19,6 +19,7 @@ import torch
 import numpy as np
 from mlperf_logging import mllog
 from mlperf_logging.mllog import constants
+import herring.torch as herring
 
 mllogger = mllog.get_mllogger()
 
@@ -61,9 +62,6 @@ def configure_logger(benchmark):
 def mlperf_submission_log(benchmark):
     required_dist_init = ['RANK', 'WORLD_SIZE', 'MASTER_ADDR', 'MASTER_PORT']
 
-    if all(var in os.environ for var in required_dist_init):
-        torch.distributed.init_process_group(backend='nccl', init_method='env://')
-
     num_nodes = os.environ.get('SLURM_NNODES', 1)
 
     configure_logger(benchmark)
@@ -96,30 +94,23 @@ def barrier():
     doesn't implement barrier for NCCL backend.
     Calls all_reduce on dummy tensor and synchronizes with GPU.
     """
-    if torch.distributed.is_initialized():
-        torch.distributed.all_reduce(torch.cuda.FloatTensor(1))
-        torch.cuda.synchronize()
+    herring.barrier()
 
 
 def get_rank():
     """
     Gets distributed rank or returns zero if distributed is not initialized.
     """
-    if torch.distributed.is_initialized():
-        rank = torch.distributed.get_rank()
-    else:
-        rank = 0
-    return rank
+    return herring.get_rank()
 
 def generate_seeds(rng, size):
     seeds = [rng.randint(0, 2**32 - 1) for _ in range(size)]
     return seeds
 
 def broadcast_seeds(seeds, device):
-    if torch.distributed.is_initialized():
-        seeds_tensor = torch.LongTensor(seeds).to(device)
-        torch.distributed.broadcast(seeds_tensor, 0)
-        seeds = seeds_tensor.tolist()
+    seeds_tensor = torch.LongTensor(seeds).to(device)
+    herring.broadcast(seeds_tensor, 0)
+    seeds = seeds_tensor.tolist()
     return seeds
 
 def set_seeds(args):

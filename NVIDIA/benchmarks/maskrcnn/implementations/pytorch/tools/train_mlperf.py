@@ -40,11 +40,14 @@ from fp16_optimizer import FP16_Optimizer
 from mlperf_logging.mllog import constants
 # See if we can use apex.DistributedDataParallel instead of the torch default,
 # and enable mixed-precision via apex.amp
-try:
-    from apex import amp
-    from apex.parallel import DistributedDataParallel as DDP
-except ImportError:
-    raise ImportError('Use APEX for multi-precision via apex.amp')
+# try:
+#     from apex import amp
+#     from apex.parallel import DistributedDataParallel as DDP
+# except ImportError:
+#     raise ImportError('Use APEX for multi-precision via apex.amp')
+import herring.torch as herring
+from herring.torch.parallel import DistributedDataParallel as DDP
+from apex import amp
 
 torch.backends.cudnn.deterministic = True
 # Loop over all finished async results, return a dict of { tag : (bbox_map, segm_map) }
@@ -110,7 +113,7 @@ def mlperf_test_early_exit(iteration, iters_per_epoch, tester, model, distribute
         if get_world_size() > 1:
             with torch.no_grad():
                 finish_tensor = torch.tensor([finished], dtype=torch.int32, device = torch.device('cuda'))
-                torch.distributed.broadcast(finish_tensor, 0)
+                herring.broadcast(finish_tensor, 0)
     
                 # If notified, end.
                 if finish_tensor.item() == 1:
@@ -159,6 +162,8 @@ def train(cfg, local_rank, distributed, random_number_generator=None):
     model = build_detection_model(cfg)
     device = torch.device(cfg.MODEL.DEVICE)
     model.to(device)
+    optimizer = make_optimizer(cfg, model)
+    print("DEVICE IS  : {}".format(device))
 
     # Initialize mixed-precision training
     is_fp16 = (cfg.DTYPE == "float16")
@@ -166,7 +171,6 @@ def train(cfg, local_rank, distributed, random_number_generator=None):
         # convert model to FP16
         model.half()
 
-    optimizer = make_optimizer(cfg, model)
     # Optimizer logging
     log_event(key=constants.OPT_NAME, value="sgd_with_momentum")
     log_event(key=constants.OPT_BASE_LR, value=cfg.SOLVER.BASE_LR)
@@ -183,7 +187,7 @@ def train(cfg, local_rank, distributed, random_number_generator=None):
     gc.disable()
 
     if distributed:
-        model = DDP(model, delay_allreduce=True)
+        model = DDP(model, device_ids=[herring.get_local_rank()], broadcast_buffers=False)
 
     arguments = {}
     arguments["iteration"] = 0
@@ -271,7 +275,7 @@ def main():
         help="path to config file",
         type=str,
     )
-    parser.add_argument("--local_rank", type=int, default=os.getenv('LOCAL_RANK', 0))
+    parser.add_argument("--local_rank", type=int, default=herring.get_local_rank())
     parser.add_argument(
         "opts",
         help="Modify config options using the command-line",
@@ -282,8 +286,9 @@ def main():
 
     args = parser.parse_args()
 
-    num_gpus = int(os.environ["WORLD_SIZE"]) if "WORLD_SIZE" in os.environ else 1
+    num_gpus = herring.get_world_size()
     args.distributed = num_gpus > 1
+    args.local_rank = herring.get_local_rank()
 
     # if is_main_process:
     #     # Setting logging file parameters for compliance logging
@@ -295,9 +300,6 @@ def main():
 
     if args.distributed:
         torch.cuda.set_device(args.local_rank)
-        torch.distributed.init_process_group(
-            backend="nccl", init_method="env://"
-        )
         # setting seeds - needs to be timed, so after RUN_START
         if is_main_process():
             master_seed = random.SystemRandom().randint(0, 2 ** 32 - 1)
@@ -305,7 +307,7 @@ def main():
         else:
             seed_tensor = torch.tensor(0, dtype=torch.float32, device=torch.device("cuda"))
 
-        torch.distributed.broadcast(seed_tensor, 0)
+        herring.broadcast(seed_tensor, 0)
         master_seed = int(seed_tensor.item())
     else:
         # random master seed, random.SystemRandom() uses /dev/urandom on Unix
@@ -330,7 +332,7 @@ def main():
     logger.info(args)
 
     # generate worker seeds, one seed for every distributed worker
-    worker_seeds = generate_seeds(random_number_generator, torch.distributed.get_world_size() if torch.distributed.is_initialized() else 1)
+    worker_seeds = generate_seeds(random_number_generator, herring.get_world_size())
 
     # todo sharath what if CPU
     # broadcast seeds from rank=0 to other workers

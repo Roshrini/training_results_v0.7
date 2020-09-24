@@ -3,7 +3,7 @@
 # FIXME remove this once c10d fixes the bug it has
 import math
 import torch
-import torch.distributed as dist
+import herring.torch as herring
 from torch.utils.data.sampler import Sampler
 
 
@@ -24,13 +24,9 @@ class DistributedSampler(Sampler):
 
     def __init__(self, dataset, num_replicas=None, rank=None, shuffle=True):
         if num_replicas is None:
-            if not dist.is_available():
-                raise RuntimeError("Requires distributed package to be available")
-            num_replicas = dist.get_world_size()
+            num_replicas = herring.get_world_size()
         if rank is None:
-            if not dist.is_available():
-                raise RuntimeError("Requires distributed package to be available")
-            rank = dist.get_rank()
+            rank = herring.get_rank()
         self.dataset = dataset
         self.num_replicas = num_replicas
         self.rank = rank

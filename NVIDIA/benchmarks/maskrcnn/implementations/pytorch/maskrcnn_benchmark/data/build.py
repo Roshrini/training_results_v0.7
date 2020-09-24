@@ -5,6 +5,7 @@ import copy
 import logging
 
 import torch.utils.data
+import herring.torch as herring
 from maskrcnn_benchmark.utils.comm import get_world_size
 from maskrcnn_benchmark.utils.imports import import_file
 
@@ -61,7 +62,8 @@ def build_dataset(dataset_list, transforms, dataset_catalog, is_train=True):
 
 def make_data_sampler(dataset, shuffle, distributed):
     if distributed:
-        return samplers.DistributedSampler(dataset, shuffle=shuffle)
+        return samplers.DistributedSampler(dataset, shuffle=shuffle, num_replicas=herring.get_world_size(),
+                                           rank=herring.get_rank())
     if shuffle:
         sampler = torch.utils.data.sampler.RandomSampler(dataset)
     else:
