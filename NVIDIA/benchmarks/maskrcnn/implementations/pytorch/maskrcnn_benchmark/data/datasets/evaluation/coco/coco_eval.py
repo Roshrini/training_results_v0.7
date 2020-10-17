@@ -43,7 +43,6 @@ def remove_dup(l):
 
 def evaluate_coco(dataset, coco_results, iou_types, output_folder):
     results = COCOResults(*iou_types)
-    # logger.info("Evaluating predictions")
     print("Evaluating predictions")
     dataset.coco.createIndex(use_ext=True)
     for iou_type in iou_types:
@@ -122,22 +121,23 @@ def do_coco_evaluation(
     if "keypoints" in iou_types:
         coco_results["keypoints"] = [i for j in temp_keypoints_list for i in j]
 
+    results = evaluate_coco(dataset, coco_results, iou_types, output_folder)
     # Submit to async evaluator
-    get_evaluator().submit_task(get_tag(),
-                                evaluate_coco,
-                                dataset,
-                                coco_results,
-                                iou_types,
-                                output_folder)
+   # get_evaluator().submit_task(get_tag(),
+    #                            evaluate_coco,
+    #                            dataset,
+    #                            coco_results,
+    #                            iou_types,
+    #                            output_folder)
     # Note: None of these are possible now
-    # logger.info(results)
-    # check_expected_results(results, expected_results, expected_results_sigma_tol)
+   # logger.info(results)
+    check_expected_results(results, expected_results, expected_results_sigma_tol)
     # if output_folder:
     #     torch.save(results, os.path.join(output_folder, "coco_results.pth"))
 
     # Note: results is now empty, the relevant future is held in the hidden
     # AsyncEvaluator object
-    return None, coco_results
+    return results, coco_results
 
 
 def prepare_for_coco_detection(predictions, dataset):

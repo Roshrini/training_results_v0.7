@@ -10,6 +10,8 @@ from maskrcnn_benchmark.utils.c2_model_loading import load_c2_format
 from maskrcnn_benchmark.utils.imports import import_file
 from maskrcnn_benchmark.utils.model_zoo import cache_url
 
+from collections import defaultdict
+from itertools import chain
 
 class Checkpointer(object):
     def __init__(
@@ -39,23 +41,23 @@ class Checkpointer(object):
         nhwc = kwargs.get("nhwc", False)
         data = {}
         data["model"] = self.model.state_dict()
-        if self.optimizer is not None:
-            data["optimizer"] = self.optimizer.state_dict()
+     #   if self.optimizer is not None:
+ #           data["optimizer"] = self.optimizer.state_dict()
         if self.scheduler is not None:
             data["scheduler"] = self.scheduler.state_dict()
         data.update(kwargs)
         # transpose to NCHW before saving as checkpoint if NHWC is used
         if nhwc:
             transpose_checkpoint_model_state_nhwc_to_nchw(data["model"])
-            transpose_optimizer_state_nhwc_to_nchw(self.model, data["optimizer"])
+  #          transpose_optimizer_state_nhwc_to_nchw(self.model, data["optimizer"])
         save_file = os.path.join(self.save_dir, "{}.pth".format(name))
         self.logger.info("Saving checkpoint to {}".format(save_file))
         torch.save(data, save_file)
         self.tag_last_checkpoint(save_file)
         # Convert back to NHWC if NHWC layout is used, needed for optimizer buffers
-        if nhwc:
-            if self.optimizer is not None:
-                transpose_optimizer_state_nchw_to_nhwc(self.model, self.optimizer.state_dict()) 
+  #      if nhwc:
+   #         if self.optimizer is not None:
+    #            transpose_optimizer_state_nchw_to_nhwc(self.model, self.optimizer.state_dict()) 
 
     def load(self, f=None, nhwc=False):
         if self.has_checkpoint():

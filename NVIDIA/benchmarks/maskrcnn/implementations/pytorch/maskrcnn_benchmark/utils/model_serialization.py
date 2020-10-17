@@ -42,6 +42,7 @@ def align_and_update_state_dicts(model_state_dict, loaded_state_dict, nhwc):
     max_size_loaded = max([len(key) for key in loaded_keys]) if loaded_keys else 1
     log_str_template = "{: <{}} loaded from {: <{}} of shape {}"
     logger = logging.getLogger(__name__)
+    nhwc = True
     for idx_new, idx_old in enumerate(idxs.tolist()):
         if idx_old == -1:
             continue

@@ -91,7 +91,7 @@ def do_train(
             current_images, current_targets = next_images, next_targets
             next_images, next_targets = _prefetch()
             yield current_images, current_targets
-    
+
     synchronize()
     optimizer.zero_grad()
     for iteration, (images, targets) in enumerate(prefetcher(iter(data_loader)), start_iter):

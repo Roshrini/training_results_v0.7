@@ -6,6 +6,7 @@ from maskrcnn_benchmark.utils.env import setup_environment  # noqa F401 isort:sk
 
 import argparse
 import os
+import time
 
 import torch
 from maskrcnn_benchmark.config import cfg
@@ -14,9 +15,10 @@ from maskrcnn_benchmark.engine.inference import inference
 from maskrcnn_benchmark.modeling.detector import build_detection_model
 from maskrcnn_benchmark.utils.checkpoint import DetectronCheckpointer
 from maskrcnn_benchmark.utils.collect_env import collect_env_info
-from maskrcnn_benchmark.utils.comm import synchronize, get_rank
+from maskrcnn_benchmark.utils.comm import synchronize, get_rank, is_main_process
 from maskrcnn_benchmark.utils.logger import setup_logger
 from maskrcnn_benchmark.utils.miscellaneous import mkdir
+from maskrcnn_benchmark.utils.async_evaluator import init, get_evaluator, set_epoch_tag, get_tag
 
 # Check if we can enable mixed-precision via apex.amp
 try:
@@ -45,7 +47,6 @@ def main():
 
     num_gpus = int(os.environ["WORLD_SIZE"]) if "WORLD_SIZE" in os.environ else 1
     distributed = num_gpus > 1
-
     if distributed:
         torch.cuda.set_device(args.local_rank)
         torch.distributed.init_process_group(
@@ -64,13 +65,18 @@ def main():
 
     logger.info("Collecting env info (might take some time)")
     logger.info("\n" + collect_env_info())
+    
+    init()
+    tag = 17
+    set_epoch_tag(tag)
 
     model = build_detection_model(cfg)
     model.to(cfg.MODEL.DEVICE)
 
-    # Initialize mixed-precision if necessary
-    use_mixed_precision = cfg.DTYPE == 'float16'
-    amp_handle = amp.init(enabled=use_mixed_precision, verbose=cfg.AMP_VERBOSE)
+    is_fp16 = (cfg.DTYPE == "float16")
+    if is_fp16:
+        # convert model to FP16
+        model.half()
 
     output_dir = cfg.OUTPUT_DIR
     checkpointer = DetectronCheckpointer(cfg, model, save_dir=output_dir)
@@ -89,8 +95,14 @@ def main():
             mkdir(output_folder)
             output_folders[idx] = output_folder
     data_loaders_val = make_data_loader(cfg, is_train=False, is_distributed=distributed)
+
+
+ #   evaluator = get_evaluator()
+
+    start_test_time = time.time()
+    results = []
     for output_folder, dataset_name, data_loader_val in zip(output_folders, dataset_names, data_loaders_val):
-        inference(
+        result = inference(
             model,
             data_loader_val,
             dataset_name=dataset_name,
@@ -101,8 +113,17 @@ def main():
             expected_results_sigma_tol=cfg.TEST.EXPECTED_RESULTS_SIGMA_TOL,
             output_folder=output_folder,
         )
-        synchronize()
+        results.append(result)
+    end_test_time = time.time()
+    total_testing_time = end_test_time - start_test_time
 
+    if is_main_process():
+        map_results, raw_results = results[0]
+        bbox_map = map_results.results["bbox"]['AP']
+        segm_map = map_results.results["segm"]['AP']
+        print("BBOX_mAP: ", bbox_map, " MASK_mAP: ", segm_map)
+
+    print("Inference time: ", total_testing_time)
 
 if __name__ == "__main__":
     main()

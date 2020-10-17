@@ -74,38 +74,43 @@ def check_completed_tags():
 
 def mlperf_test_early_exit(iteration, iters_per_epoch, tester, model, distributed, min_bbox_map, min_segm_map):
     # Note: let iters / epoch == 10k, at iter 9999 we've finished epoch 0 and need to test
+  #  print("see these values ", iteration, iters_per_epoch)
     if iteration > 0 and (iteration + 1)% iters_per_epoch == 0:
         synchronize()
         epoch = iteration // iters_per_epoch + 1
-
+     #   print(epoch)
         log_end(key=constants.EPOCH_STOP, metadata={"epoch_num": epoch})
         log_end(key=constants.BLOCK_STOP, metadata={"first_epoch_num": epoch})
         log_start(key=constants.EVAL_START, metadata={"epoch_num":epoch})
         # set the async evaluator's tag correctly
         set_epoch_tag(epoch)
 
+        #return True
+
         # Note: No longer returns anything, underlying future is in another castle
-        tester(model=model, distributed=distributed)
+#        tester(model=model, distributed=distributed)
         # necessary for correctness
         model.train()
-    else:
+ #   else:
         # Otherwise, check for finished async results
-        results = check_completed_tags()
-
+  #      results = check_completed_tags()
         # on master process, check each result for terminating condition
         # sentinel for run finishing
         finished = 0
         if is_main_process():
-            for result_epoch, (bbox_map, segm_map) in results.items():
-                logger = logging.getLogger('maskrcnn_benchmark.trainer')
-                logger.info('bbox mAP: {}, segm mAP: {}'.format(bbox_map, segm_map))
+            if epoch == 17:
+                finished = 1
+  #          for result_epoch, (bbox_map, segm_map) in results.items():
+   #             print("in else is main ",result_epoch)
+    #            logger = logging.getLogger('maskrcnn_benchmark.trainer')
+     #           logger.info('bbox mAP: {}, segm mAP: {}'.format(bbox_map, segm_map))
 
-                log_event(key=constants.EVAL_ACCURACY, value={"BBOX" : bbox_map, "SEGM" : segm_map}, metadata={"epoch_num" : result_epoch} )
-                log_end(key=constants.EVAL_STOP, metadata={"epoch_num": result_epoch})
+      #          log_event(key=constants.EVAL_ACCURACY, value={"BBOX" : bbox_map, "SEGM" : segm_map}, metadata={"epoch_num" : result_epoch} )
+      #          log_end(key=constants.EVAL_STOP, metadata={"epoch_num": result_epoch})
                 # terminating condition
-                if bbox_map >= min_bbox_map and segm_map >= min_segm_map:
-                    logger.info("Target mAP reached, exiting...")
-                    finished = 1
+      #          if bbox_map >= min_bbox_map and segm_map >= min_segm_map:
+      #              logger.info("Target mAP reached, exiting...")
+      #              finished = 1
                     #return True
 
         # We now know on rank 0 whether or not we should terminate
