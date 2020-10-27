@@ -14,21 +14,146 @@ from ..utils.comm import is_main_process
 from ..utils.comm import all_gather
 from ..utils.comm import synchronize
 
+import multiprocessing as mp
+import queue
+from maskrcnn_benchmark.modeling.roi_heads.mask_head.inference import Masker
+import numpy as np
+import copy
 
-def compute_on_dataset(model, data_loader, device):
+def prepare_for_coco_segmentation_batch(in_q, out_q, dataset, finish_input):
+    import pycocotools.mask as mask_util
+    import numpy as np
+
+    masker = Masker(threshold=0.5, padding=1)
+    # assert isinstance(dataset, COCODataset)
+    coco_results = []
+    while(not finish_input.is_set()):
+#        if(not in_q.empty()):
+        try:
+            out = in_q.get(False)
+         #   except queue.Empty:
+         #       continue
+            for image_id, prediction in out.items():
+          #      print("is it in segmentation for loop ", len(prediction), flush=True)
+                
+                original_id = dataset.id_to_img_map[image_id]
+                if len(prediction) == 0:
+                    continue
+
+                img_info = dataset.get_img_info(image_id)
+                image_width = img_info["width"]
+                image_height = img_info["height"]
+                prediction_ = prediction.resize((image_width, image_height))
+               # print(prediction)
+             #   np.resize(prediction, (image_width, image_height))
+                print("what is this value after resize", prediction_)
+                masks = prediction_.get_field("mask")
+                print("this is after resize", prediction_)
+              #  masks = prediction_list[0]
+                # Masker is necessary only if masks haven't been already resized.
+                if list(masks.shape[-2:]) != [image_height, image_width]:
+                    masks = masker(masks.expand(1, -1, -1, -1, -1), prediction_)
+                    masks = masks[0]
+              #      print("in mask compute ", flush=True)
+                # prediction = prediction.convert('xywh')
+                print("what is this value ", prediction)
+                # boxes = prediction.bbox.tolist()
+                scores = prediction_.get_field("scores").tolist()
+                labels = prediction_.get_field("labels").tolist()
+
+                # rles = prediction.get_field('mask')
+                print("started encoding ", flush=True)
+
+               # masks = prediction_list[0]
+               # scores = prediction_list[1]
+                #labels = prediction_list[2]
+
+                rles = [
+                    mask_util.encode(np.array(mask[0, :, :, np.newaxis], order="F"))[0]
+                    for mask in masks
+                ]
+                for rle in rles:
+                    rle["counts"] = rle["counts"].decode("utf-8")
+
+          #      print("decoding done", flush=True)
+          #      print("after decoding ", rles, flush=True)
+
+                mapped_labels = [dataset.contiguous_category_id_to_json_id[i] for i in labels]
+
+                coco_results.extend(
+                    [
+                        {
+                            "image_id": original_id,
+                            "category_id": mapped_labels[k],
+                            "segmentation": rle,
+                            "score": scores[k],
+                        }
+                        for k, rle in enumerate(rles)
+                    ]
+                )
+        except queue.Empty:
+            pass
+    print("putting coco results ")
+    out_q.put(coco_results)
+    return
+
+def compute_on_dataset(model, data_loader, dataset, device):
+#def compute_on_dataset(model, data_loader, device):
+    in_q = mp.Queue()
+    out_q = mp.Queue()
+    stop_event = mp.Event()
+    stop_event.clear()
+    post_proc = mp.Process(target=prepare_for_coco_segmentation_batch, args=(in_q, out_q, dataset, stop_event))
+    post_proc2 = mp.Process(target=prepare_for_coco_segmentation_batch, args=(in_q, out_q, dataset, stop_event))
+    post_proc3 = mp.Process(target=prepare_for_coco_segmentation_batch, args=(in_q, out_q, dataset, stop_event))
+    post_proc.start()
+    post_proc2.start()
+    post_proc3.start()
+
     model.eval()
     results_dict = {}
     cpu_device = torch.device("cpu")
+    bb_op = {}
+    masker = Masker(threshold=0.5, padding=1)
+    
     for i, batch in enumerate(tqdm(data_loader)):
         images, targets, image_ids = batch
         images = images.to(device)
         with torch.no_grad():
             output = model(images)
             output = [o.to(cpu_device) for o in output]
+
+   #     for img_id, pred in zip(image_ids, output):
+   #         img_info = dataset.get_img_info(img_id)
+   #         image_width = img_info["width"]
+   #         image_height = img_info["height"]
+   #         pred = pred.resize((image_width, image_height))
+   #         masks = pred.get_field("mask")
+           # if list(masks.shape[-2:]) != [image_height, image_width]:
+           #     masks = masker(masks.expand(1, -1, -1, -1, -1), pred)
+           #     masks = masks[0]
+     #       scores = pred.get_field("scores").tolist()
+    #        labels = pred.get_field("labels").tolist()
+           # print(type(masks))
+          #  print("from boxlist values ", i.fields())
+      #      bb_op.update({img_id: [masks.numpy(), scores, labels]})
+           # bb_op.append([o.to_numpy() for o in output])
         results_dict.update(
             {img_id: result for img_id, result in zip(image_ids, output)}
         )
-    return results_dict
+        preds = copy.deepcopy(results_dict)
+        #bb_op.update({img_id: [masks.numpy(), scores, labels]})
+#        print("started putting items ", flush=True)
+        in_q.put(preds, False)
+    stop_event.set()
+ #   converted_predictions = out_q.get()
+    converted_predictions = out_q.get() + out_q.get() + out_q.get()
+    post_proc.join()
+    post_proc2.join()
+    post_proc3.join()
+    print("Q is empty ", in_q.empty())
+    return results_dict, converted_predictions
+ #   return results_dict
 
 
 def _accumulate_predictions_from_multiple_gpus(predictions_per_gpu):
@@ -72,14 +197,21 @@ def inference(
         else 1
     )
     logger = logging.getLogger("maskrcnn_benchmark.inference")
+    data_load_start = time.time()
     dataset = data_loader.dataset
+    data_load_time = time.time() - data_load_start
+    logger.info("Data loading time {} ".format(data_load_time))
     logger.info("Start evaluation on {} dataset({} images).".format(dataset_name, len(dataset)))
     start_time = time.time()
-    predictions = compute_on_dataset(model, data_loader, device)
+ #   synchronize()
+    predictions, prepare_segm = compute_on_dataset(model, data_loader, dataset, device)
+#    prepare_segm = {}
+#    predictions = compute_on_dataset(model, data_loader, device)
     # wait for all processes to complete before measuring the time
     synchronize()
     total_time = time.time() - start_time
     total_time_str = str(datetime.timedelta(seconds=total_time))
+    logger.info("dataset length: {}  ".format(len(dataset)))
     logger.info(
         "Total inference time: {} ({} s / img per device, on {} devices)".format(
             total_time_str, total_time * num_devices / len(dataset), num_devices
@@ -90,18 +222,25 @@ def inference(
     # If not using COCO, fall back to regular path: gather predictions from all ranks
     # and call evaluate on those results.
     if not isinstance(dataset, datasets.COCODataset):
+        acc_start = time.time()
         predictions = _accumulate_predictions_from_multiple_gpus(predictions)
+        acc_total = time.time() - acc_start
+        logger.info("Accumulating predictions {} ".format(acc_total))
         if not is_main_process():
             return
 
     if output_folder and is_main_process():
+        save_pred_start = time.time()
         torch.save(predictions, os.path.join(output_folder, "predictions.pth"))
+        save_pred = time.time() - save_pred_start
+        logger.info("Time to save predictions {} ".format(save_pred))
 
     extra_args = dict(
         box_only=box_only,
         iou_types=iou_types,
         expected_results=expected_results,
         expected_results_sigma_tol=expected_results_sigma_tol,
+        prepare_segm=prepare_segm,
     )
 
     return evaluate(dataset=dataset,

@@ -70,18 +70,26 @@ def main():
     tag = 17
     set_epoch_tag(tag)
 
+    model_build_start = time.time()
     model = build_detection_model(cfg)
     model.to(cfg.MODEL.DEVICE)
 
+    # Initialize mixed-precision if necessary
+#    use_mixed_precision = cfg.DTYPE == 'float16'
+ #   amp.initialize(model, enabled=use_mixed_precision, opt_level="O1", verbosity=cfg.AMP_VERBOSE)
+
+   # mixed_start = time.time()
     is_fp16 = (cfg.DTYPE == "float16")
     if is_fp16:
         # convert model to FP16
         model.half()
+  #  mixed_end = time.time()-mixed_start
+  #  print("halving time ",mixed_end)
 
     output_dir = cfg.OUTPUT_DIR
     checkpointer = DetectronCheckpointer(cfg, model, save_dir=output_dir)
     _ = checkpointer.load(cfg.MODEL.WEIGHT)
-
+    print("Model loaded ", time.time()-model_build_start)
     iou_types = ("bbox",)
     if cfg.MODEL.MASK_ON:
         iou_types = iou_types + ("segm",)
@@ -94,8 +102,11 @@ def main():
             output_folder = os.path.join(cfg.OUTPUT_DIR, "inference", dataset_name)
             mkdir(output_folder)
             output_folders[idx] = output_folder
+ 
+    start_data_time = time.time() 
     data_loaders_val = make_data_loader(cfg, is_train=False, is_distributed=distributed)
-
+    end_data_time = time.time() 
+    total_data_time = end_data_time - start_data_time
 
  #   evaluator = get_evaluator()
 
@@ -116,13 +127,14 @@ def main():
         results.append(result)
     end_test_time = time.time()
     total_testing_time = end_test_time - start_test_time
-
+    print("number of inference calls ",len(results))
     if is_main_process():
         map_results, raw_results = results[0]
         bbox_map = map_results.results["bbox"]['AP']
         segm_map = map_results.results["segm"]['AP']
         print("BBOX_mAP: ", bbox_map, " MASK_mAP: ", segm_map)
 
+    print("Data time: ", total_data_time)
     print("Inference time: ", total_testing_time)
 
 if __name__ == "__main__":

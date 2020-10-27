@@ -7,6 +7,7 @@ import torch
 from collections import OrderedDict
 from tqdm import tqdm
 from multiprocessing import Pool
+import time
 
 from maskrcnn_benchmark.modeling.roi_heads.mask_head.inference import Masker
 from maskrcnn_benchmark.structures.bounding_box import BoxList
@@ -46,14 +47,18 @@ def evaluate_coco(dataset, coco_results, iou_types, output_folder):
     print("Evaluating predictions")
     dataset.coco.createIndex(use_ext=True)
     for iou_type in iou_types:
-        with tempfile.NamedTemporaryFile() as f:
-            file_path = f.name
-            if output_folder:
-                file_path = os.path.join(output_folder, iou_type + ".json")
-            res = evaluate_predictions_on_coco(
-                dataset.coco, coco_results[iou_type], file_path, iou_type
-            )
-            results.update(res)
+        res = evaluate_predictions_on_coco(
+                dataset.coco, coco_results[iou_type], iou_type
+                )
+        results.update(res)
+   #     with tempfile.NamedTemporaryFile() as f:
+   #         file_path = f.name
+   #         if output_folder:
+   #             file_path = os.path.join(output_folder, iou_type + ".json")
+   #         res = evaluate_predictions_on_coco(
+   #             dataset.coco, coco_results[iou_type], file_path, iou_type
+   #         )
+    #        results.update(res)
     return results
 
 def do_coco_evaluation(
@@ -64,9 +69,10 @@ def do_coco_evaluation(
     iou_types,
     expected_results,
     expected_results_sigma_tol,
+    prepare_segm,
 ):
     logger = logging.getLogger("maskrcnn_benchmark.inference")
-
+    total_eval_start = time.time()
     # Different path here, fast parallel method not available, fall back to effectively the old
     # path.
     if box_only:
@@ -91,16 +97,27 @@ def do_coco_evaluation(
         return
     logger.info("Preparing results for COCO format")
     coco_results = {}
+    prepare_start = time.time()
     if "bbox" in iou_types:
         logger.info("Preparing bbox results")
+        bbox_start = time.time()
         coco_results["bbox"] = prepare_for_coco_detection(predictions, dataset)
+        bbox_end = time.time() - bbox_start
+        print("timing for bbox ", bbox_end)
     if "segm" in iou_types:
         logger.info("Preparing segm results")
-        coco_results["segm"] = prepare_for_coco_segmentation(predictions, dataset)
+        segm_start = time.time()
+      #  coco_results["segm"] = prepare_for_coco_segmentation(predictions, dataset)
+        coco_results["segm"] = prepare_segm
+        segm_end = time.time()-segm_start
+        print("timing for segm ", segm_end)
     if 'keypoints' in iou_types:
         logger.info('Preparing keypoints results')
         coco_results['keypoints'] = prepare_for_coco_keypoint(predictions, dataset)
+    prepare_time = time.time() - prepare_start
+    print("bbox, segm, keypoints preparation ", prepare_time)
 
+    gather_start = time.time()
     # Gather all prepared predictions of each type from all ranks
     if "bbox" in iou_types:
         temp_bbox_list = all_gather(coco_results["bbox"])
@@ -108,6 +125,8 @@ def do_coco_evaluation(
         temp_segm_list = all_gather(coco_results["segm"])
     if "keypoints" in iou_types:
         temp_keypoints_list = all_gather(coco_results["keypoints"])
+    gather_time = time.time() - gather_start
+    print("All gather time: ", gather_time)
 
     # Only main process will call COCO
     if not is_main_process():
@@ -121,7 +140,10 @@ def do_coco_evaluation(
     if "keypoints" in iou_types:
         coco_results["keypoints"] = [i for j in temp_keypoints_list for i in j]
 
+    start_eval_time = time.time()
     results = evaluate_coco(dataset, coco_results, iou_types, output_folder)
+    cocoeval_time = time.time() - start_eval_time
+    print("COCOeval time : ", cocoeval_time)
     # Submit to async evaluator
    # get_evaluator().submit_task(get_tag(),
     #                            evaluate_coco,
@@ -132,6 +154,8 @@ def do_coco_evaluation(
     # Note: None of these are possible now
    # logger.info(results)
     check_expected_results(results, expected_results, expected_results_sigma_tol)
+    total_eval_end = time.time()-total_eval_start
+    print("Total eval : ", total_eval_end)
     # if output_folder:
     #     torch.save(results, os.path.join(output_folder, "coco_results.pth"))
 
@@ -181,6 +205,7 @@ def prepare_for_coco_segmentation(predictions, dataset):
     masker = Masker(threshold=0.5, padding=1)
     # assert isinstance(dataset, COCODataset)
     coco_results = []
+
     for image_id, prediction in predictions.items():
         original_id = dataset.id_to_img_map[image_id]
         if len(prediction) == 0:
@@ -202,7 +227,7 @@ def prepare_for_coco_segmentation(predictions, dataset):
         labels = prediction.get_field("labels").tolist()
 
         # rles = prediction.get_field('mask')
-
+        
         rles = [
             mask_util.encode(np.array(mask[0, :, :, np.newaxis], order="F"))[0]
             for mask in masks
@@ -374,25 +399,33 @@ def evaluate_box_proposals(
 
 
 def evaluate_predictions_on_coco(
-    coco_gt, coco_results, json_result_file, iou_type="bbox"
+    coco_gt, coco_results, iou_type="bbox"
 ):
-    import json
-
+ #   import json
+ #   print("coco results type: ", type(coco_results))
+ #   print("coco results length: ", len(coco_results))
+ #   json_start = time.time()
     # Some run conditions can result in duplicate entries in the results.
     # This makes COCO unhappy and reduces the final accuracies -- remove such
     # duplicated results here before passing over to cocotools
-    set_of_json = remove_dup([json.dumps(d) for d in coco_results])
-    unique_list = [json.loads(s) for s in set_of_json]
+ #   set_of_json = remove_dup([json.dumps(d) for d in coco_results])
+ #   unique_list = [json.loads(s) for s in set_of_json]
 
-    with open(json_result_file, "w") as f:
-        json.dump(unique_list, f)
+  #  with open(json_result_file, "w") as f:
+  #      json.dump(unique_list, f)
+
+  #  json_end = time.time() - json_start
+  #  print("json files dumping time", json_end)
 
     from pycocotools.coco import COCO
     from pycocotools.cocoeval import COCOeval
 
-    coco_dt = coco_gt.loadRes(str(json_result_file), use_ext=True) if coco_results else COCO()
-
-    # coco_dt = coco_gt.loadRes(coco_results)
+ #   coco_dt = coco_gt.loadRes(str(json_result_file), use_ext=True) if coco_results else COCO()
+ #   print(coco_dt)
+ #   print(type(coco_dt))
+    # import numpy as np
+    print("pred lengthss ",len(coco_results))
+    coco_dt = coco_gt.loadRes(coco_results, use_ext=True)
     coco_eval = COCOeval(coco_gt, coco_dt, iou_type, use_ext=True)
     coco_eval.evaluate()
     coco_eval.accumulate()

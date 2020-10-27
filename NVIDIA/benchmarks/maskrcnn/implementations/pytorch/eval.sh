@@ -3,7 +3,7 @@ CONFIG='configs/e2e_mask_rcnn_R_50_FPN_1x.yaml'
 
 #This folder should a file called 'last_checkpoint' which contains the path to the actual checkpoint
 FOLDER='/shared/datasets/checkpoints_32_epoch17'
-LOGFILE="$FOLDER/job_eval32_epoch.log"
+LOGFILE="$FOLDER/job_eval32_epoch_test.log"
 if ! [ -d "$FOLDER" ]; then mkdir $FOLDER; fi
 
 echo "Launching job"
@@ -15,8 +15,9 @@ python3 -m torch.distributed.launch --nproc_per_node=8 tools/test_net.py --confi
 			PATHS_CATALOG '/shared/roshanin/training_results_v0.7/NVIDIA/benchmarks/maskrcnn/implementations/pytorch/maskrcnn_benchmark/config/paths_catalog_dbcluster.py' \
 			OUTPUT_DIR $FOLDER \
  			DISABLE_REDUCED_LOGGING True \
-			TEST.IMS_PER_BATCH 8 \
+			TEST.IMS_PER_BATCH 256 \
 			NHWC True \
+			DATALOADER.NUM_WORKERS 4 \
 			| tee $LOGFILE
 
 #2019-02-22 00:05:39,954 maskrcnn_benchmark.inference INFO: Total inference time: 0:04:55.840343 (0.05916806864738464 s / img per device, on 1 devices)

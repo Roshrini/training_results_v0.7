@@ -209,6 +209,17 @@ class BoxList(object):
             bbox.add_field(k, v)
         return bbox
 
+    def to_numpy(self, **kwargs):
+        bbox = BoxList(self.bbox.numpy(), self.size, self.mode)
+    #    bbox = self.bbox 
+        for k, v in self.extra_fields.items():
+            if hasattr(v, "to_numpy"):
+                if torch.is_tensor(v):
+                    nv = v.numpy(**kwargs)
+                bbox.add_field(k, nv)
+        bbox._copy_extra_fields(self)
+        return bbox
+
     def pin_memory(self):
         bbox = BoxList(self.bbox.pin_memory(), self.size, self.mode)
         for k, v in self.extra_fields.items():
@@ -268,6 +279,7 @@ class BoxList(object):
             elif not skip_missing:
                 raise KeyError("Field '{}' not found in {}".format(field, self))
         return bbox
+    
 
     def __repr__(self):
         s = self.__class__.__name__ + "("
