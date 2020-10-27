@@ -69,7 +69,7 @@ def do_coco_evaluation(
     iou_types,
     expected_results,
     expected_results_sigma_tol,
-    prepare_segm,
+  #  prepare_segm,
 ):
     logger = logging.getLogger("maskrcnn_benchmark.inference")
     total_eval_start = time.time()
@@ -107,8 +107,8 @@ def do_coco_evaluation(
     if "segm" in iou_types:
         logger.info("Preparing segm results")
         segm_start = time.time()
-      #  coco_results["segm"] = prepare_for_coco_segmentation(predictions, dataset)
-        coco_results["segm"] = prepare_segm
+        coco_results["segm"] = prepare_for_coco_segmentation(predictions, dataset)
+      #  coco_results["segm"] = prepare_segm
         segm_end = time.time()-segm_start
         print("timing for segm ", segm_end)
     if 'keypoints' in iou_types:

@@ -101,23 +101,23 @@ def prepare_for_coco_segmentation_batch(in_q, out_q, dataset, finish_input):
     out_q.put(coco_results)
     return
 
-def compute_on_dataset(model, data_loader, dataset, device):
-#def compute_on_dataset(model, data_loader, device):
-    in_q = mp.Queue()
-    out_q = mp.Queue()
-    stop_event = mp.Event()
-    stop_event.clear()
-    post_proc = mp.Process(target=prepare_for_coco_segmentation_batch, args=(in_q, out_q, dataset, stop_event))
-    post_proc2 = mp.Process(target=prepare_for_coco_segmentation_batch, args=(in_q, out_q, dataset, stop_event))
-    post_proc3 = mp.Process(target=prepare_for_coco_segmentation_batch, args=(in_q, out_q, dataset, stop_event))
-    post_proc.start()
-    post_proc2.start()
-    post_proc3.start()
+#def compute_on_dataset(model, data_loader, dataset, device):
+def compute_on_dataset(model, data_loader, device):
+ #   in_q = mp.Queue()
+ #   out_q = mp.Queue()
+ #   stop_event = mp.Event()
+ #   stop_event.clear()
+ #   post_proc = mp.Process(target=prepare_for_coco_segmentation_batch, args=(in_q, out_q, dataset, stop_event))
+ #   post_proc2 = mp.Process(target=prepare_for_coco_segmentation_batch, args=(in_q, out_q, dataset, stop_event))
+ #   post_proc3 = mp.Process(target=prepare_for_coco_segmentation_batch, args=(in_q, out_q, dataset, stop_event))
+ #   post_proc.start()
+ #   post_proc2.start()
+ #   post_proc3.start()
 
     model.eval()
     results_dict = {}
     cpu_device = torch.device("cpu")
-    bb_op = {}
+ #   bb_op = {}
    # masker = Masker(threshold=0.5, padding=1)
     
     for i, batch in enumerate(tqdm(data_loader)):
@@ -127,20 +127,20 @@ def compute_on_dataset(model, data_loader, dataset, device):
             output = model(images)
             output = [o.to(cpu_device) for o in output]
 
-        for img_id, pred in zip(image_ids, output):
+  #      for img_id, pred in zip(image_ids, output):
     #        img_info = dataset.get_img_info(img_id)
    #         image_width = img_info["width"]
    #         image_height = img_info["height"]
    #         pred = pred.resize((image_width, image_height))
-            masks = pred.get_field("mask")
+   #         masks = pred.get_field("mask")
            # if list(masks.shape[-2:]) != [image_height, image_width]:
            #     masks = masker(masks.expand(1, -1, -1, -1, -1), pred)
            #     masks = masks[0]
-            scores = pred.get_field("scores").tolist()
-            labels = pred.get_field("labels").tolist()
+    #        scores = pred.get_field("scores").tolist()
+     #       labels = pred.get_field("labels").tolist()
            # print(type(masks))
           #  print("from boxlist values ", i.fields())
-            bb_op.update({img_id: [masks.numpy(), scores, labels, pred]})
+     #       bb_op.update({img_id: [masks.numpy(), scores, labels, pred]})
            # bb_op.append([o.to_numpy() for o in output])
         results_dict.update(
             {img_id: result for img_id, result in zip(image_ids, output)}
@@ -148,16 +148,16 @@ def compute_on_dataset(model, data_loader, dataset, device):
       #  preds = copy.deepcopy(results_dict)
         #bb_op.update({img_id: [masks.numpy(), scores, labels]})
 #        print("started putting items ", flush=True)
-        in_q.put(bb_op, False)
-    stop_event.set()
+      #  in_q.put(bb_op, False)
+ #   stop_event.set()
  #   converted_predictions = out_q.get()
-    converted_predictions = out_q.get() + out_q.get() + out_q.get()
-    post_proc.join()
-    post_proc2.join()
-    post_proc3.join()
-    print("Q is empty ", in_q.empty())
-    return results_dict, converted_predictions
- #   return results_dict
+  #  converted_predictions = out_q.get() + out_q.get() + out_q.get()
+  #  post_proc.join()
+  #  post_proc2.join()
+  #  post_proc3.join()
+  #  print("Q is empty ", in_q.empty())
+   # return results_dict, converted_predictions
+    return results_dict
 
 
 def _accumulate_predictions_from_multiple_gpus(predictions_per_gpu):
@@ -208,9 +208,9 @@ def inference(
     logger.info("Start evaluation on {} dataset({} images).".format(dataset_name, len(dataset)))
     start_time = time.time()
  #   synchronize()
-    predictions, prepare_segm = compute_on_dataset(model, data_loader, dataset, device)
+  #  predictions, prepare_segm = compute_on_dataset(model, data_loader, dataset, device)
 #    prepare_segm = {}
-#    predictions = compute_on_dataset(model, data_loader, device)
+    predictions = compute_on_dataset(model, data_loader, device)
     # wait for all processes to complete before measuring the time
     synchronize()
     total_time = time.time() - start_time
@@ -244,7 +244,7 @@ def inference(
         iou_types=iou_types,
         expected_results=expected_results,
         expected_results_sigma_tol=expected_results_sigma_tol,
-        prepare_segm=prepare_segm,
+ #       prepare_segm=prepare_segm,
     )
 
     return evaluate(dataset=dataset,
