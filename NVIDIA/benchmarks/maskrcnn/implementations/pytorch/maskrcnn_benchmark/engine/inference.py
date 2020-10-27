@@ -31,45 +31,49 @@ def prepare_for_coco_segmentation_batch(in_q, out_q, dataset, finish_input):
 #        if(not in_q.empty()):
         try:
             out = in_q.get(False)
+         #   out_ = copy.deepcopy(out)
          #   except queue.Empty:
          #       continue
-            for image_id, prediction in out.items():
+            for image_id, prediction_list in out.items():
           #      print("is it in segmentation for loop ", len(prediction), flush=True)
                 
                 original_id = dataset.id_to_img_map[image_id]
-                if len(prediction) == 0:
+                if len(prediction_list) == 0:
                     continue
 
                 img_info = dataset.get_img_info(image_id)
                 image_width = img_info["width"]
                 image_height = img_info["height"]
-                prediction_ = prediction.resize((image_width, image_height))
+            #    prediction_ = copy.deepcopy(prediction)
+                prediction_ = prediction_list[3]
+                prediction_ = prediction_.resize((image_width, image_height))
                # print(prediction)
              #   np.resize(prediction, (image_width, image_height))
-                print("what is this value after resize", prediction_)
-                masks = prediction_.get_field("mask")
-                print("this is after resize", prediction_)
-              #  masks = prediction_list[0]
+             #   print("what is this value after resize", prediction_)
+           #     masks = prediction_.get_field("mask")
+             #   print("this is after resize", prediction_)
+                masks = torch.from_numpy(prediction_list[0])
+             #   masks = prediction_list[0]
                 # Masker is necessary only if masks haven't been already resized.
-                if list(masks.shape[-2:]) != [image_height, image_width]:
-                    masks = masker(masks.expand(1, -1, -1, -1, -1), prediction_)
-                    masks = masks[0]
+            #    if list(masks.shape[-2:]) != [image_height, image_width]:
+            #        masks_n = masker(torch.from_numpy(masks).expand(1, -1, -1, -1, -1), prediction_)
+            #        masks_ = masks_n[0]
               #      print("in mask compute ", flush=True)
                 # prediction = prediction.convert('xywh')
-                print("what is this value ", prediction)
+            #    print("what is this value ", prediction)
                 # boxes = prediction.bbox.tolist()
-                scores = prediction_.get_field("scores").tolist()
-                labels = prediction_.get_field("labels").tolist()
+              #  scores = prediction_.get_field("scores").tolist()
+              #  labels = prediction_.get_field("labels").tolist()
 
                 # rles = prediction.get_field('mask')
-                print("started encoding ", flush=True)
+             #   print("started encoding ", flush=True)
 
                # masks = prediction_list[0]
-               # scores = prediction_list[1]
-                #labels = prediction_list[2]
+                scores = prediction_list[1]
+                labels = prediction_list[2]
 
                 rles = [
-                    mask_util.encode(np.array(mask[0, :, :, np.newaxis], order="F"))[0]
+                    mask_util.encode(np.array(mask[0, :, :, np.newaxis],dtype=np.uint8, order="F"))[0]
                     for mask in masks
                 ]
                 for rle in rles:
@@ -114,7 +118,7 @@ def compute_on_dataset(model, data_loader, dataset, device):
     results_dict = {}
     cpu_device = torch.device("cpu")
     bb_op = {}
-    masker = Masker(threshold=0.5, padding=1)
+   # masker = Masker(threshold=0.5, padding=1)
     
     for i, batch in enumerate(tqdm(data_loader)):
         images, targets, image_ids = batch
@@ -123,28 +127,28 @@ def compute_on_dataset(model, data_loader, dataset, device):
             output = model(images)
             output = [o.to(cpu_device) for o in output]
 
-   #     for img_id, pred in zip(image_ids, output):
-   #         img_info = dataset.get_img_info(img_id)
+        for img_id, pred in zip(image_ids, output):
+    #        img_info = dataset.get_img_info(img_id)
    #         image_width = img_info["width"]
    #         image_height = img_info["height"]
    #         pred = pred.resize((image_width, image_height))
-   #         masks = pred.get_field("mask")
+            masks = pred.get_field("mask")
            # if list(masks.shape[-2:]) != [image_height, image_width]:
            #     masks = masker(masks.expand(1, -1, -1, -1, -1), pred)
            #     masks = masks[0]
-     #       scores = pred.get_field("scores").tolist()
-    #        labels = pred.get_field("labels").tolist()
+            scores = pred.get_field("scores").tolist()
+            labels = pred.get_field("labels").tolist()
            # print(type(masks))
           #  print("from boxlist values ", i.fields())
-      #      bb_op.update({img_id: [masks.numpy(), scores, labels]})
+            bb_op.update({img_id: [masks.numpy(), scores, labels, pred]})
            # bb_op.append([o.to_numpy() for o in output])
         results_dict.update(
             {img_id: result for img_id, result in zip(image_ids, output)}
         )
-        preds = copy.deepcopy(results_dict)
+      #  preds = copy.deepcopy(results_dict)
         #bb_op.update({img_id: [masks.numpy(), scores, labels]})
 #        print("started putting items ", flush=True)
-        in_q.put(preds, False)
+        in_q.put(bb_op, False)
     stop_event.set()
  #   converted_predictions = out_q.get()
     converted_predictions = out_q.get() + out_q.get() + out_q.get()
