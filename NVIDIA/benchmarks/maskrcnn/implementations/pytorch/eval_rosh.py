@@ -14,9 +14,9 @@ CMD="ssh ubuntu@{} \
         tools/test_net.py --config-file '/shared/roshanin/training_results_v0.7/NVIDIA/benchmarks/maskrcnn/implementations/pytorch/configs/e2e_mask_rcnn_R_50_FPN_1x.yaml' \
         DTYPE 'float16' \
         PATHS_CATALOG '/shared/roshanin/training_results_v0.7/NVIDIA/benchmarks/maskrcnn/implementations/pytorch/maskrcnn_benchmark/config/paths_catalog_dbcluster.py' \
-        OUTPUT_DIR '/shared/datasets/checkpoints_train_eval_test' \
+        OUTPUT_DIR '/shared/datasets/checkpoints_train_eval_test1' \
         DISABLE_REDUCED_LOGGING True \
-        TEST.IMS_PER_BATCH 512 \
+        TEST.IMS_PER_BATCH 256 \
         NHWC True \
         DATALOADER.NUM_WORKERS 4 \
         &> /shared/datasets/eval_test5\""
