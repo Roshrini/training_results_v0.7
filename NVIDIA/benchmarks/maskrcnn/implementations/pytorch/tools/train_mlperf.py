@@ -71,6 +71,37 @@ def check_completed_tags():
     
     return {}
 
+def mlperf_checkpoint_early_exit(iteration, iters_per_epoch, checkpointer, cfg):
+    if iteration > 0 and (iteration + 1)% iters_per_epoch == 0:
+        synchronize()
+        finished = 0
+        if is_main_process():
+            epoch = iteration // iters_per_epoch + 1
+            log_end(key=constants.EPOCH_STOP, metadata={"epoch_num": epoch})
+            log_end(key=constants.BLOCK_STOP, metadata={"first_epoch_num": epoch})
+            log_start(key=constants.EVAL_START, metadata={"epoch_num":epoch})
+            # check_if_done_file_present
+            done_file = list(glob.glob(os.path.join(cfg.OUTPUT_DIR, 'done')))
+            if len(done_file)>0:
+                finished = 1
+            else:
+                checkpointer.save("epoch_{}".format(epoch), nhwc=cfg.NHWC)
+        if get_world_size() > 1:
+            with torch.no_grad():
+                finish_tensor = torch.tensor([finished], dtype=torch.int32, device = torch.device('cuda'))
+                if use_herring:
+                    herring.broadcast(finish_tensor, 0)
+                else:
+                    torch.distributed.broadcast(finish_tensor, 0)
+    
+                # If notified, end.
+                if finish_tensor.item() == 1:
+                    return True
+        else:
+            # Single GPU, don't need to create tensor to bcast, just use value directly
+            if finished == 1:
+                return True
+        return False
 
 def mlperf_test_early_exit(iteration, iters_per_epoch, tester, model, distributed, min_bbox_map, min_segm_map):
     # Note: let iters / epoch == 10k, at iter 9999 we've finished epoch 0 and need to test
@@ -231,13 +262,18 @@ def train(cfg, local_rank, distributed, random_number_generator=None):
     # early exit each epoch
     if cfg.PER_EPOCH_EVAL:
         per_iter_callback_fn = functools.partial(
-                mlperf_test_early_exit,
+                mlperf_checkpoint_early_exit,
                 iters_per_epoch=iters_per_epoch,
-                tester=functools.partial(test, cfg=cfg),
-                model=model,
-                distributed=distributed,
-                min_bbox_map=cfg.MLPERF.MIN_BBOX_MAP,
-                min_segm_map=cfg.MLPERF.MIN_SEGM_MAP)
+                # tester=functools.partial(test, cfg=cfg),
+                #tester=infer_coco_eval,
+                #model=model,
+                # distributed=distributed,
+                #data_loader=eval_data_loader,
+                checkpointer=checkpointer,
+                cfg=cfg,
+                #min_bbox_map=cfg.MLPERF.MIN_BBOX_MAP,
+                #min_segm_map=cfg.MLPERF.MIN_SEGM_MAP)
+        )
     else:
         per_iter_callback_fn = None
 

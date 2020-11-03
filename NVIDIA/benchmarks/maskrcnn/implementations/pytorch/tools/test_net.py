@@ -11,6 +11,7 @@ import time
 import torch
 from maskrcnn_benchmark.config import cfg
 from maskrcnn_benchmark.data import make_data_loader
+from maskrcnn_benchmark.data.datasets.evaluation.coco.coco_eval_np import infer_coco_eval
 from maskrcnn_benchmark.engine.inference import inference
 from maskrcnn_benchmark.modeling.detector import build_detection_model
 from maskrcnn_benchmark.utils.checkpoint import DetectronCheckpointer
@@ -72,34 +73,26 @@ def do_eval(cfg, model, distributed):
     data_loaders_val = make_data_loader(cfg, is_train=False, is_distributed=distributed)
     end_data_time = time.time()
     total_data_time = end_data_time - start_data_time
+    model.eval()
 
     start_test_time = time.time()
     results = []
     for output_folder, dataset_name, data_loader_val in zip(output_folders, dataset_names, data_loaders_val):
-        result = inference(
-            model,
-            data_loader_val,
-            dataset_name=dataset_name,
-            iou_types=iou_types,
-            box_only=False if cfg.MODEL.RETINANET_ON else cfg.MODEL.RPN_ONLY,
-            device=cfg.MODEL.DEVICE,
-            expected_results=cfg.TEST.EXPECTED_RESULTS,
-            expected_results_sigma_tol=cfg.TEST.EXPECTED_RESULTS_SIGMA_TOL,
-            output_folder=output_folder,
-        )
+        result = infer_coco_eval(model, data_loader_val, cfg, pool_size=8)
         results.append(result)
     end_test_time = time.time()
     total_testing_time = end_test_time - start_test_time
     print("number of inference calls ",len(results))
 
     if is_main_process():
-        map_results, raw_results = results[0]
-        bbox_map = map_results.results["bbox"]['AP']
-        segm_map = map_results.results["segm"]['AP']
+        # map_results, raw_results = results[0]
+        bbox_map = results[0]["bbox"]
+        segm_map = results[0]["segm"]
         print("BBOX_mAP: ", bbox_map, " MASK_mAP: ", segm_map)
 
     print("Data time: ", total_data_time)
     print("Inference time: ", total_testing_time)
+    return results[0]
 
 
 
@@ -160,8 +153,8 @@ def main():
 #    output_dir = cfg.OUTPUT_DIR
 #    checkpointer = DetectronCheckpointer(cfg, model, save_dir=output_dir)
 #    _ = checkpointer.load(cfg.MODEL.WEIGHT)
-
-    while True:
+    done = False
+    while not done:
         if len(input_q) == 0 or input_q[0] == last:
             pass
         if len(input_q) !=0 and input_q[0] != last:
@@ -170,7 +163,13 @@ def main():
             print("Running eval for", last)
             checkpointer = DetectronCheckpointer(cfg, model, save_dir=output_dir)
             _ = checkpointer.load(cfg.MODEL.WEIGHT)
-            do_eval(cfg, model, distributed)
+            eval_result = do_eval(cfg, model, distributed)
+            done = ((eval_result['bbox'] >= .377) and (eval_result['segm'] >= .339))
+            print(done)
+            if is_main_process and done:
+                done_file = os.path.join(cfg.OUTPUT_DIR, "done")
+                with open(done_file, 'w') as stop_trigger:
+                    stop_trigger.write('done')
         time.sleep(5)
 
 if __name__ == "__main__":
