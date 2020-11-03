@@ -20,11 +20,91 @@ from maskrcnn_benchmark.utils.logger import setup_logger
 from maskrcnn_benchmark.utils.miscellaneous import mkdir
 from maskrcnn_benchmark.utils.async_evaluator import init, get_evaluator, set_epoch_tag, get_tag
 
+import multiprocessing as mp
+import queue
+from collections import deque
+import threading
+
 # Check if we can enable mixed-precision via apex.amp
 try:
     from apex import amp
 except ImportError:
     raise ImportError('Use APEX for mixed precision via apex.amp')
+
+def has_checkpoint(checkpt_dir):
+    saved_file = os.path.join(checkpt_dir, "last_checkpoint")
+    return os.path.exists(saved_file)
+
+def get_checkpoint_file(checkpt_dir):
+    saved_file = os.path.join(checkpt_dir, "last_checkpoint")
+    try:
+        with open(saved_file, "r") as f:
+            last_saved = f.read()
+            last_saved = last_saved.strip()
+    except IOError:
+        # if file doesn't exist
+        last_saved = ""
+    return last_saved
+
+def get_latest_checkpoint(q, checkpt_dir):
+    encountered_checkpoints = set()
+    while True:
+        if has_checkpoint(checkpt_dir):
+            latest = get_checkpoint_file(checkpt_dir) 
+            if (latest is not None) and (len(q) == 0 or q[-1] != latest) and (latest not in encountered_checkpoints):
+                q.append(latest)
+                encountered_checkpoints.add(latest)
+            time.sleep(1)
+
+def do_eval(cfg, model, distributed):
+    iou_types = ("bbox",)
+    if cfg.MODEL.MASK_ON:
+        iou_types = iou_types + ("segm",)
+    if cfg.MODEL.KEYPOINT_ON:
+        iou_types = iou_types + ("keypoints",)
+    output_folders = [None] * len(cfg.DATASETS.TEST)
+    dataset_names = cfg.DATASETS.TEST
+    if cfg.OUTPUT_DIR:
+        for idx, dataset_name in enumerate(dataset_names):
+            output_folder = os.path.join(cfg.OUTPUT_DIR, "inference", dataset_name)
+            mkdir(output_folder)
+            output_folders[idx] = output_folder
+
+    start_data_time = time.time()
+    data_loaders_val = make_data_loader(cfg, is_train=False, is_distributed=distributed)
+    end_data_time = time.time()
+    total_data_time = end_data_time - start_data_time
+
+ #   evaluator = get_evaluator()
+
+    start_test_time = time.time()
+    results = []
+    for output_folder, dataset_name, data_loader_val in zip(output_folders, dataset_names, data_loaders_val):
+        result = inference(
+            model,
+            data_loader_val,
+            dataset_name=dataset_name,
+            iou_types=iou_types,
+            box_only=False if cfg.MODEL.RETINANET_ON else cfg.MODEL.RPN_ONLY,
+            device=cfg.MODEL.DEVICE,
+            expected_results=cfg.TEST.EXPECTED_RESULTS,
+            expected_results_sigma_tol=cfg.TEST.EXPECTED_RESULTS_SIGMA_TOL,
+            output_folder=output_folder,
+        )
+        results.append(result)
+    end_test_time = time.time()
+    total_testing_time = end_test_time - start_test_time
+    print("number of inference calls ",len(results))
+
+    if is_main_process():
+        map_results, raw_results = results[0]
+        bbox_map = map_results.results["bbox"]['AP']
+        segm_map = map_results.results["segm"]['AP']
+        print("BBOX_mAP: ", bbox_map, " MASK_mAP: ", segm_map)
+
+    print("Data time: ", total_data_time)
+    print("Inference time: ", total_testing_time)
+
 
 
 def main():
@@ -86,9 +166,29 @@ def main():
   #  mixed_end = time.time()-mixed_start
   #  print("halving time ",mixed_end)
 
+    input_q = deque()
     output_dir = cfg.OUTPUT_DIR
-    checkpointer = DetectronCheckpointer(cfg, model, save_dir=output_dir)
-    _ = checkpointer.load(cfg.MODEL.WEIGHT)
+
+    checkpt_loader = threading.Thread(target=get_latest_checkpoint, args=(input_q, output_dir))
+    checkpt_loader.start()
+    last = None
+#    output_dir = cfg.OUTPUT_DIR
+#    checkpointer = DetectronCheckpointer(cfg, model, save_dir=output_dir)
+#    _ = checkpointer.load(cfg.MODEL.WEIGHT)
+
+    while True:
+        if len(input_q) == 0 or input_q[0] == last:
+            pass
+        if len(input_q) !=0 and input_q[0] != last:
+            last = input_q[0]
+            input_q.popleft()
+            print("Running eval for", last)
+            checkpointer = DetectronCheckpointer(cfg, model, save_dir=last)
+            _ = checkpointer.load(cfg.MODEL.WEIGHT)
+            do_eval(cfg, model, distributed)
+        time.sleep(5)
+
+'''            
     print("Model loaded ", time.time()-model_build_start)
     iou_types = ("bbox",)
     if cfg.MODEL.MASK_ON:
@@ -136,6 +236,7 @@ def main():
 
     print("Data time: ", total_data_time)
     print("Inference time: ", total_testing_time)
+'''
 
 if __name__ == "__main__":
     main()

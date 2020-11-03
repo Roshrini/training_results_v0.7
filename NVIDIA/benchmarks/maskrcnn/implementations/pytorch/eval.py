@@ -14,12 +14,12 @@ CMD="ssh ubuntu@{} \
         tools/test_net.py --config-file '/shared/roshanin/training_results_v0.7/NVIDIA/benchmarks/maskrcnn/implementations/pytorch/configs/e2e_mask_rcnn_R_50_FPN_1x.yaml' \
         DTYPE 'float16' \
         PATHS_CATALOG '/shared/roshanin/training_results_v0.7/NVIDIA/benchmarks/maskrcnn/implementations/pytorch/maskrcnn_benchmark/config/paths_catalog_dbcluster.py' \
-        OUTPUT_DIR 'checkpoints_32_epoch14_bs512_iter_4' \
+        OUTPUT_DIR '/shared/gautam/checkpoints_32_epoch17_bs512_1_' \
         DISABLE_REDUCED_LOGGING True \
         TEST.IMS_PER_BATCH 512 \
         NHWC True \
         DATALOADER.NUM_WORKERS 4 \
-        &> checkpoints_32_epoch14_bs512_iter_4/eval_4node_log5\""
+        &> /shared/gautam/checkpoints_32_epoch17_bs512_1_/eval_4node_log5\""
 
 f = open("/shared/roshanin/training_results_v0.7/NVIDIA/benchmarks/maskrcnn/implementations/pytorch/newh", "r")
 lines = f.readlines()

@@ -30,5 +30,7 @@ MODEL.RPN.FPN_POST_NMS_TOP_N_TRAIN ${FPN_POST_NMS_TOP_N_TRAIN} \
 NHWC True \
 SOLVER.CHECKPOINT_PERIOD 700 \
 SAVE_CHECKPOINTS True \
-OUTPUT_DIR '/shared/datasets/checkpoints_new' \
+OUTPUT_DIR '/shared/datasets/checkpoints_train_eval_test' \
 PER_EPOCH_EVAL True
+
+
